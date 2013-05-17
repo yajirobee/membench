@@ -19,7 +19,6 @@
     }
 
 const int CACHE_LINE_SZ  = 64; // assume cache line is 64B
-double timeout = 10 * 1000 * 1000.0; // default timeout is 10 seconds
 
 typedef struct {
     unsigned long ops;
@@ -33,6 +32,56 @@ typedef struct {
   long *working_area;
   long working_size;
 } mem_bench_info_t;
+
+struct {
+  int usecore;
+  long access_size;
+  double timeout;
+} option;
+
+void
+parsearg(int argc, char **argv)
+{
+  int opt;
+
+  option.usecore = 1;
+  option.access_size = 1 << 20;
+  option.timeout = 10 * 1000 * 1000.0; // default timeout is 10 seconds
+
+  while ((opt = getopt(argc, argv, "c:s:t:")) != -1) {
+    switch (opt) {
+    case 'c':
+      option.usecore = atoi(optarg);
+      break;
+    case 's':
+      {
+        char *suffix;
+        option.access_size = strtol(optarg, &suffix, 10);
+        switch (*suffix){
+        case 'k':
+        case 'K':
+          option.access_size <<= 10;
+          break;
+        case 'm':
+        case 'M':
+          option.access_size <<= 20;
+          break;
+        case 'g':
+        case 'G':
+          option.access_size <<= 30;
+          break;
+        }
+        break;
+      }
+    case 't':
+      option.timeout = atof(optarg) * 1000000.0;
+      break;
+    default:
+      fprintf(stderr, "Usage : %s [-c cpuno] [-s accesssize] [-t timeout(sec)]\n", argv[0]);
+      exit(EXIT_FAILURE);
+    }
+  }
+}
 
 static inline double
 elapsed_time_from(struct timeval *tv)
@@ -117,7 +166,7 @@ memory_stress_rand(perf_counter_t *pc,
   }
 
   GETTIMEOFDAY(&stime);
-  while ((t = elapsed_time_from(&stime)) < timeout) {
+  while ((t = elapsed_time_from(&stime)) < option.timeout) {
     t0 = read_tsc();
     ptr = ptr_start;
     for (i = 0; i < niter; i++){
@@ -146,7 +195,7 @@ numa_membench(mem_bench_info_t *mbinfo)
       (long *)numa_alloc_onnode(mbinfo->working_size, mbinfo->destnode);
     if (NULL == mbinfo->working_area) {
       perror("numa_alloc_onnode");
-      exit(1);
+      exit(EXIT_FAILURE);
     }
     memset(mbinfo->working_area, 0, mbinfo->working_size);
   }
@@ -157,66 +206,24 @@ numa_membench(mem_bench_info_t *mbinfo)
   numa_free(mbinfo->working_area, mbinfo->working_size);
 }
 
-int main(int argc, char **argv) {
+int
+main(int argc, char **argv)
+{
   int i;
-  int cpuno;
   cpu_set_t cpuset;
   mem_bench_info_t mbinfo;
 
   if (numa_available() == -1){
     fprintf(stderr, "numa functions aren't available\n");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
-  if (argc == 3) {
-    unsigned long size;
-    char *suffix;
-    cpuno = atoi(argv[1]);
-    size = strtol(argv[2], &suffix, 10);
-    switch (*suffix){
-    case 'k':
-    case 'K':
-      size <<= 10;
-      break;
-    case 'm':
-    case 'M':
-      size <<= 20;
-      break;
-    case 'g':
-    case 'G':
-      size <<= 30;
-      break;
-    }
-    mbinfo.working_size = size;
-  } else if (argc == 4) {
-    unsigned long size;
-    char *suffix;
-    cpuno = atoi(argv[1]);
-    size = strtol(argv[2], &suffix, 10);
-    switch (*suffix){
-    case 'k':
-    case 'K':
-      size <<= 10;
-      break;
-    case 'm':
-    case 'M':
-      size <<= 20;
-      break;
-    case 'g':
-    case 'G':
-      size <<= 30;
-      break;
-    }
-    mbinfo.working_size = size;
-    timeout = atof(argv[3]) * 1000 * 1000.0;
-  } else {
-    fprintf(stderr, "Usage : %s cpuno accesssize [timeout(sec)]\n", argv[0]);
-    exit(1);
-  }
+  parsearg(argc, argv);
+  mbinfo.working_size = option.access_size;
 
   // set affinity
   CPU_ZERO(&cpuset);
-  CPU_SET(cpuno, &cpuset);
+  CPU_SET(option.usecore, &cpuset);
   sched_setaffinity(getpid(), sizeof(cpu_set_t), &cpuset);
 
   // read benchmark
