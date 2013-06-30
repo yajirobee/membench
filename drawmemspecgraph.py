@@ -45,7 +45,7 @@ if __name__ == "__main__":
             query = ("select access_size/1024,avg({0}) from {1} "
                      "where alloc_node={{alloc_node}} group by access_size"
                      .format(col["name"], tbl))
-            gds.extend(pu.query2data(conn, query, alloc_node = nodes,
+            gds.extend(pu.query2gds(conn, query, alloc_node = nodes,
                                      title = "alloc\_node = {alloc_node}",
                                      with_ = "linespoints"))
         sys.stdout.write('draw : {0}\n'.format(figpath))
